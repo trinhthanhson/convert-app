@@ -1,0 +1,27 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "convert-app",
+  "outputfilename": "ThienMongConvert.exe",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "http://localhost:5173",
+  "webview2": "download",
+  "author": {
+    "name": "Thiên Mộng Studio",
+    "email": ""
+  },
+  "info": {
+    "productName": "Thiên Mộng PDF",
+    "productVersion": "2.0.0",
+    "copyright": "Copyright © 2026",
+    "comments": "Phần mềm chuyển đổi và xử lý PDF chuyên dụng"
+  },
+  "nsis": {
+    "include": true,
+    "compression": "luna",
+    "installDirectory": "$PROGRAMFILES64\\ThienMongStudio",
+    "icon": "build/appicon.ico",
+    "uninstallerIcon": "build/appicon.ico"
+  }
+}

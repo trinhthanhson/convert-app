@@ -1,0 +1,30 @@
+/* Ép toàn bộ nền ứng dụng trong suốt để thấy Mica từ Go */
+html, body, #root {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    width: 100%;
+    background: transparent !important; 
+    font-family: 'Inter', sans-serif;
+}
+
+/* Hiệu ứng riêng cho nút Close khi rê chuột vào */
+.close-hover:hover {
+    background-color: #e81123 !important;
+    color: white !important;
+}
+
+/* Hiệu ứng cho các nút khác khi rê chuột vào */
+button:hover:not(.close-hover) {
+    background-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+/* index.css */
+.win-btn {
+  -webkit-app-region: no-drag !important; /* Ép không cho phép drag đè lên nút */
+  isolation: isolate; /* Tạo lớp layer riêng để tránh xung đột sự kiện */
+}
+
+.win-btn svg {
+  pointer-events: none; /* Để click xuyên qua icon vào thẳng button */
+}
