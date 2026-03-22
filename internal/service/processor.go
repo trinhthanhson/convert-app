@@ -8,6 +8,15 @@ import (
 	"strings"
 )
 
+// getPythonExecutable: Lấy đường dẫn Python từ file config
+func getPythonExecutable() string {
+	data, err := os.ReadFile("python_path.txt")
+	if err != nil {
+		return "python" // fallback nếu không tìm thấy file
+	}
+	return strings.TrimSpace(string(data))
+}
+
 // ProcessResult: Cấu trúc dùng chung cho tất cả các hành động
 type ProcessResult struct {
 	Success    bool   `json:"success"`
@@ -27,7 +36,7 @@ type PdfPagePreview struct {
 func ConvertPdfToDocx(inputPath string, outputPath string) ProcessResult {
 	// Sử dụng trực tiếp outputPath được truyền từ App Handler
 	pyScript := fmt.Sprintf("from pdf2docx import Converter; cv = Converter(r'%s'); cv.convert(r'%s'); cv.close()", inputPath, outputPath)
-	cmd := exec.Command("python", "-c", pyScript)
+	cmd := exec.Command(getPythonExecutable(), "-c", pyScript)
 
 	if err := cmd.Run(); err != nil {
 		return ProcessResult{Success: false, Error: err.Error()}
@@ -39,7 +48,7 @@ func ConvertPdfToDocx(inputPath string, outputPath string) ProcessResult {
 func ConvertDocxToPdf(inputPath string, outputPath string) ProcessResult {
 	// Sử dụng trực đưa outputPath vào script Python
 	pyScript := fmt.Sprintf("from docx2pdf import convert; convert(r'%s', r'%s')", inputPath, outputPath)
-	cmd := exec.Command("python", "-c", pyScript)
+	cmd := exec.Command(getPythonExecutable(), "-c", pyScript)
 
 	if err := cmd.Run(); err != nil {
 		return ProcessResult{Success: false, Error: err.Error()}
@@ -69,7 +78,7 @@ merger.write(r'%s')
 merger.close()
 	`, pyList, outputPath)
 
-	cmd := exec.Command("python", "-c", pyScript)
+	cmd := exec.Command(getPythonExecutable(), "-c", pyScript)
 	if err := cmd.Run(); err != nil {
 		return ProcessResult{Success: false, Error: err.Error()}
 	}
@@ -123,9 +132,32 @@ except Exception as e:
 	`, inputPath)
 
 	// Set up environment with poppler PATH
-	cmd := exec.Command("python", "-c", pyScript)
-	popplerPath := `d:\GoLang\convert-app\convert-app\temp\poppler-23.11.0\Library\bin`
-	cmd.Env = append(os.Environ(), "PATH="+popplerPath+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cmd := exec.Command(getPythonExecutable(), "-c", pyScript)
+
+	// Cố gắng tìm poppler từ nhiều vị trí
+	popplerPath := os.Getenv("POPPLER_PATH") // Nếu user set env var
+	if popplerPath == "" {
+		// Fallback: Tìm ở các vị trí thường dùng
+		possiblePaths := []string{
+			`temp\poppler-23.11.0\Library\bin`,     // Relative path from executable
+			`C:\Program Files\poppler\Library\bin`, // Common installation
+			`C:\Program Files (x86)\poppler\Library\bin`,
+		}
+
+		for _, path := range possiblePaths {
+			if _, err := os.Stat(path); err == nil {
+				popplerPath = path
+				break
+			}
+		}
+	}
+
+	// Append poppler path nếu tìm được
+	if popplerPath != "" {
+		cmd.Env = append(os.Environ(), "PATH="+popplerPath+string(os.PathListSeparator)+os.Getenv("PATH"))
+	} else {
+		cmd.Env = os.Environ()
+	}
 
 	output, err := cmd.Output()
 	if err != nil {
