@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { SelectSingleFile, DeletePages, OpenFileFolder, GetSavePath, GetPdfPagePreviews } from '../../wailsjs/go/main/App';
+import { SelectSingleFile, ActionDeletePages, OpenFileFolder, GetSavePath, GetPdfPagePreviews } from '../../wailsjs/go/main/App';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FileMinus, FolderOpen, CheckCircle2, Loader2, RefreshCw, ArrowRight, FileText, AlertCircle, X, Eye, EyeOff } from 'lucide-react';
 
@@ -89,10 +89,10 @@ export const PdfDelete = () => {
     try {
       // 3. Gọi hàm Go với 3 tham số (File gốc, Mảng trang, File đích)
       // Lưu ý: Nếu Go của bạn chưa cập nhật tham số thứ 3, hãy cập nhật app.go trước
-      const result = await DeletePages(filePath, pageArray, savePath);
+      const result = await ActionDeletePages(filePath, pageArray.join(', '), savePath);
       
       if (result) {
-        setResultPath(result);
+        setResultPath(result.outputPath);
       }
     } catch (err) {
       alert('Lỗi: ' + err);

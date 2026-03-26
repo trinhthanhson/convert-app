@@ -1,200 +1,115 @@
 package service
 
 import (
-	"encoding/json"
+	"bytes"
+	_ "embed" // Thư viện bắt buộc để nhúng file
+	"encoding/base64"
 	"fmt"
+	"image/jpeg"
 	"os"
 	"os/exec"
-	"strings"
+	"path/filepath"
+
+	"github.com/gen2brain/go-fitz"
+	"github.com/pdfcpu/pdfcpu/pkg/api"
 )
 
-// getPythonExecutable: Lấy đường dẫn Python từ file config
-func getPythonExecutable() string {
-	data, err := os.ReadFile("python_path.txt")
-	if err != nil {
-		return "python" // fallback nếu không tìm thấy file
-	}
-	return strings.TrimSpace(string(data))
-}
+// nhúng file engine.exe vào biến engineBytes (đảm bảo file nằm đúng thư mục bin)
+//
+//go:embed bin/engine.exe
+var engineBytes []byte
 
-// ProcessResult: Cấu trúc dùng chung cho tất cả các hành động
+// Cấu trúc kết quả trả về
 type ProcessResult struct {
 	Success    bool   `json:"success"`
 	OutputPath string `json:"outputPath"`
 	Error      string `json:"error"`
 }
 
-// PdfPagePreview: Cấu trúc cho preview trang PDF
 type PdfPagePreview struct {
 	PageNumber int    `json:"pageNumber"`
-	ImageData  string `json:"imageData"` // base64 encoded image
+	ImageData  string `json:"imageData"`
 	Width      int    `json:"width"`
 	Height     int    `json:"height"`
 }
 
-// ConvertPdfToDocx: Chuyển PDF -> Word với outputPath do người dùng chọn
+// runEngine: Hàm dùng chung để giải nén và chạy engine.exe
+func runEngine(args ...string) ([]byte, error) {
+	tempExe := filepath.Join(os.TempDir(), "thien_mong_engine_v2.exe")
+
+	// CHỈ GHI FILE NẾU CHƯA TỒN TẠI (Tiết kiệm thời gian ghi đè)
+	if _, err := os.Stat(tempExe); os.IsNotExist(err) {
+		err = os.WriteFile(tempExe, engineBytes, 0755)
+		if err != nil {
+			return nil, fmt.Errorf("lỗi khởi tạo: %v", err)
+		}
+	}
+
+	cmd := exec.Command(tempExe, args...)
+	return cmd.CombinedOutput()
+}
+
+// --- CÁC HÀM XỬ LÝ CHÍNH ---
+
 func ConvertPdfToDocx(inputPath string, outputPath string) ProcessResult {
-	// Sử dụng trực tiếp outputPath được truyền từ App Handler
-	pyScript := fmt.Sprintf("from pdf2docx import Converter; cv = Converter(r'%s'); cv.convert(r'%s'); cv.close()", inputPath, outputPath)
-	cmd := exec.Command(getPythonExecutable(), "-c", pyScript)
-
-	if err := cmd.Run(); err != nil {
-		return ProcessResult{Success: false, Error: err.Error()}
-	}
-	return ProcessResult{Success: true, OutputPath: outputPath}
-}
-
-// ConvertDocxToPdf: Chuyển Word -> PDF với outputPath do người dùng chọn
-func ConvertDocxToPdf(inputPath string, outputPath string) ProcessResult {
-	// Sử dụng trực đưa outputPath vào script Python
-	pyScript := fmt.Sprintf("from docx2pdf import convert; convert(r'%s', r'%s')", inputPath, outputPath)
-	cmd := exec.Command(getPythonExecutable(), "-c", pyScript)
-
-	if err := cmd.Run(); err != nil {
-		return ProcessResult{Success: false, Error: err.Error()}
-	}
-	return ProcessResult{Success: true, OutputPath: outputPath}
-}
-
-// MergePDFs: Gộp nhiều file PDF thành một với outputPath cụ thể
-func MergePDFs(inputPaths []string, outputPath string) ProcessResult {
-	if len(inputPaths) == 0 {
-		return ProcessResult{Success: false, Error: "Danh sách file trống"}
-	}
-
-	// Chuyển mảng path Go sang list Python r'path' để tránh lỗi ký tự đặc biệt windows
-	var pyPaths []string
-	for _, p := range inputPaths {
-		pyPaths = append(pyPaths, fmt.Sprintf("r'%s'", p))
-	}
-	pyList := "[" + strings.Join(pyPaths, ",") + "]"
-
-	pyScript := fmt.Sprintf(`
-from pypdf import PdfWriter
-merger = PdfWriter()
-for pdf in %s:
-    merger.append(pdf)
-merger.write(r'%s')
-merger.close()
-	`, pyList, outputPath)
-
-	cmd := exec.Command(getPythonExecutable(), "-c", pyScript)
-	if err := cmd.Run(); err != nil {
-		return ProcessResult{Success: false, Error: err.Error()}
-	}
-
-	return ProcessResult{Success: true, OutputPath: outputPath}
-}
-
-// GetPdfPagePreviews: Lấy preview của tất cả các trang PDF dưới dạng base64 images
-func GetPdfPagePreviews(inputPath string) ([]PdfPagePreview, error) {
-	// Sử dụng Python với pdf2image để chuyển đổi PDF thành images
-	pyScript := fmt.Sprintf(`
-import base64
-from pdf2image import convert_from_path
-import io
-import json
-import sys
-
-try:
-    # Chuyển đổi tất cả trang thành images với DPI thấp để preview nhanh
-    images = convert_from_path(r'%s', dpi=72, fmt='JPEG', jpegopt={'quality': 50})
-    
-    if len(images) == 0:
-        print(json.dumps({'error': 'PDF file appears to be empty or corrupted'}))
-        sys.exit(1)
-    
-    previews = []
-    for i, img in enumerate(images, 1):
-        # Chuyển image thành base64
-        buffer = io.BytesIO()
-        img.save(buffer, format='JPEG', quality=50)
-        img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        
-        preview = {
-            'pageNumber': i,
-            'imageData': f'data:image/jpeg;base64,{img_base64}',
-            'width': img.width,
-            'height': img.height
-        }
-        previews.append(preview)
-    
-    # In JSON array trực tiếp
-    print(json.dumps(previews))
-except ImportError as e:
-    print(json.dumps({'error': 'Missing required dependency: pdf2image or poppler. Please install poppler system library.'}))
-    sys.exit(1)
-except Exception as e:
-    # In error dưới dạng JSON object để dễ parse
-    error_result = {'error': f'Failed to process PDF: {str(e)}'}
-    print(json.dumps(error_result))
-    sys.exit(1)
-	`, inputPath)
-
-	// Set up environment with poppler PATH
-	cmd := exec.Command(getPythonExecutable(), "-c", pyScript)
-
-	// Cố gắng tìm poppler từ nhiều vị trí
-	popplerPath := os.Getenv("POPPLER_PATH") // Nếu user set env var
-	if popplerPath == "" {
-		// Fallback: Tìm ở các vị trí thường dùng
-		possiblePaths := []string{
-			`temp\poppler-23.11.0\Library\bin`,     // Relative path from executable
-			`C:\Program Files\poppler\Library\bin`, // Common installation
-			`C:\Program Files (x86)\poppler\Library\bin`,
-		}
-
-		for _, path := range possiblePaths {
-			if _, err := os.Stat(path); err == nil {
-				popplerPath = path
-				break
-			}
-		}
-	}
-
-	// Append poppler path nếu tìm được
-	if popplerPath != "" {
-		cmd.Env = append(os.Environ(), "PATH="+popplerPath+string(os.PathListSeparator)+os.Getenv("PATH"))
-	} else {
-		cmd.Env = os.Environ()
-	}
-
-	output, err := cmd.Output()
+	output, err := runEngine("pdf2word", inputPath, outputPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute Python script: %v", err)
+		return ProcessResult{Success: false, Error: string(output)}
 	}
+	return ProcessResult{Success: true, OutputPath: outputPath}
+}
 
-	outputStr := strings.TrimSpace(string(output))
-
-	// Parse JSON từ Python
-	var result interface{}
-	if err := json.Unmarshal([]byte(outputStr), &result); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON output: %v, output: %s", err, outputStr)
+func ConvertDocxToPdf(inputPath string, outputPath string) ProcessResult {
+	output, err := runEngine("word2pdf", inputPath, outputPath)
+	if err != nil {
+		return ProcessResult{Success: false, Error: string(output)}
 	}
+	return ProcessResult{Success: true, OutputPath: outputPath}
+}
 
-	// Check if it's an error response
-	if resultMap, ok := result.(map[string]interface{}); ok {
-		if errorMsg, exists := resultMap["error"]; exists {
-			return nil, fmt.Errorf("PDF processing error: %v", errorMsg)
-		}
+func MergePDFs(inputPaths []string, outputPath string) ProcessResult {
+	// Dùng Go thuần, không gọi engine.exe nữa -> Tốc độ bàn thờ!
+	err := api.MergeCreateFile(inputPaths, outputPath, false, nil)
+	if err != nil {
+		return ProcessResult{Success: false, Error: err.Error()}
 	}
+	return ProcessResult{Success: true, OutputPath: outputPath}
+}
 
-	// Parse as array of previews
+func GetPdfPagePreviews(inputPath string) ([]PdfPagePreview, error) {
+	// 1. Mở file PDF bằng Fitz (MuPDF)
+	doc, err := fitz.New(inputPath)
+	if err != nil {
+		return nil, fmt.Errorf("không thể mở file PDF: %v", err)
+	}
+	defer doc.Close()
+
 	var previews []PdfPagePreview
-	if previewsArray, ok := result.([]interface{}); ok {
-		for _, item := range previewsArray {
-			if previewMap, ok := item.(map[string]interface{}); ok {
-				preview := PdfPagePreview{
-					PageNumber: int(previewMap["pageNumber"].(float64)),
-					ImageData:  previewMap["imageData"].(string),
-					Width:      int(previewMap["width"].(float64)),
-					Height:     int(previewMap["height"].(float64)),
-				}
-				previews = append(previews, preview)
-			}
+
+	// 2. Duyệt qua từng trang (Giới hạn 10-20 trang đầu nếu file quá dài để tăng tốc)
+	for n := 0; n < doc.NumPage(); n++ {
+		// Render trang thành hình ảnh (DPI 72 là đủ để xem preview)
+		img, err := doc.Image(n)
+		if err != nil {
+			return nil, err
 		}
-	} else {
-		return nil, fmt.Errorf("unexpected JSON structure: %s", outputStr)
+
+		// 3. Chuyển Image sang Base64 để Frontend hiển thị được ngay
+		var buf bytes.Buffer
+		// Nén JPEG chất lượng 50% để truyền tải cho nhanh
+		err = jpeg.Encode(&buf, img, &jpeg.Options{Quality: 50})
+		if err != nil {
+			return nil, err
+		}
+
+		imgBase64 := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+		previews = append(previews, PdfPagePreview{
+			PageNumber: n + 1,
+			ImageData:  "data:image/jpeg;base64," + imgBase64,
+			Width:      img.Bounds().Dx(),
+			Height:     img.Bounds().Dy(),
+		})
 	}
 
 	return previews, nil

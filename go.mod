@@ -3,6 +3,7 @@ module convert-app
 go 1.24.0
 
 require (
+	github.com/gen2brain/go-fitz v1.23.1
 	github.com/pdfcpu/pdfcpu v0.9.1
 	github.com/wailsapp/wails/v2 v2.11.0
 )
